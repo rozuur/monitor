@@ -1,12 +1,18 @@
 extern crate clap;
 
 use clap::{App, Arg};
+use std::fs::File;
+use std::io::{Error};
 
-fn show_status(filename: &str) {
-    println!("Show status of {}", filename)
+fn pidfile_status(filename: &str) -> Result<File, Error> {
+    // Rust doesn't have exceptions and uses Result type to pass
+    // ? operator is a syntactic sugar for that makes error handling pleasant
+    let file = File::open(filename)?;
+    Ok(file)
 }
 
-fn main() {
+// To use '?' which unwraps a result or propagates error, main function should return Result
+fn main() -> Result<(), std::io::Error>{
     let matches = App::new("Monitor programs")
         .name("monitor")
         .version("0.1")
@@ -29,9 +35,12 @@ fn main() {
         if !matches.is_present("pidfile") {
             eprintln!("Error: --pidfile required");
             std::process::exit(1);
+            // Rust has panic and abort but they don't fail silently
         }
         let pidfile = matches.value_of("pidfile").unwrap_or("");
-        show_status(pidfile);
-        std::process::exit(0);
+        let status = pidfile_status(pidfile)?;
+        println!("{:?}", status);
     }
+
+    Ok(())
 }
