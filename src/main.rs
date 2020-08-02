@@ -1,20 +1,40 @@
 extern crate clap;
 
 use clap::{App, Arg};
-use std::convert::TryInto;
 use std::fs::File;
-use std::io::{stdin, Error, Read};
+use std::io::{Error, ErrorKind, Read};
 
-fn pidfile_status(filename: &str) -> Result<u32, Error> {
+const MAGIC_PREFIX: &[u8] = "MON".as_bytes();
+
+fn write_pidfile(filename: &str) {
+    // Get pid of current process
+    let pid = std::process::id();
+    // Array's doesn't implement + so concatenation works as shown,
+    // also slicing is used to convert from fixed array
+    std::fs::write(filename, [MAGIC_PREFIX, &pid.to_be_bytes()[0..]].concat());
+}
+
+// std::io::Result is type alias for std::result::Result<T, io::Error>
+fn pidfile_status(filename: &str) -> std::io::Result<u32> {
     // Defining buffer as let buf_size = 64 fails, array initialization requires it as constant
     // And BUF_SIZE type should be usize, if not specified number will be treated as integer i32
-    const BUF_SIZE: usize = 64;
+    const BUF_SIZE: usize = MAGIC_PREFIX.len() + 4;
     // Following creates an integer array of size 256 and filled with 0's
     let mut buf: [u8; BUF_SIZE] = [0; BUF_SIZE];
     // Rust doesn't have exceptions and uses Result type to pass
     // ? operator is a syntactic sugar for that makes error handling pleasant
     let mut file = File::open(filename)?;
     let size = file.read(&mut buf[0..BUF_SIZE])?;
+
+    // assert_eq! should be preferred instead of assert
+    assert_eq!(
+        size, BUF_SIZE,
+        "Unable to read required bytes from {}",
+        filename
+    );
+    if &buf[0..3] != MAGIC_PREFIX {
+        return Err(Error::new(ErrorKind::InvalidData, "Invalid pidfile"));
+    }
     /*
     Trying to parse an pid from file
 
@@ -24,7 +44,7 @@ fn pidfile_status(filename: &str) -> Result<u32, Error> {
     from_be_bytes takes [u8; 4] and there is no trivial way to convert an array to fixed size array
      */
 
-    let pid = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]);
+    let pid = u32::from_be_bytes([buf[3], buf[4], buf[5], buf[6]]);
     Ok(pid)
 }
 
@@ -54,17 +74,22 @@ fn main() -> Result<(), std::io::Error> {
             std::process::exit(1);
             // Rust has panic and abort but they don't fail silently
         }
-        let pidfile = matches.value_of("pidfile").unwrap_or("");
+        let pidfile = matches.value_of("pidfile").unwrap();
         let status = pidfile_status(pidfile)?;
         println!("{:?}", status);
     }
 
-    /*
-     If not status and pidfile is present, write current process pid into it
-     Use magic number when writing, to not read pid from arbitrary file
+    if matches.is_present("pidfile") {
+        write_pidfile(matches.value_of("pidfile").unwrap());
+        return Ok(());
+    }
 
-     Use same pidfile and display stats
-     */
+    /*
+    If not status and pidfile is present, write current process pid into it
+    Use magic number when writing, to not read pid from arbitrary file
+
+    Use same pidfile and display stats
+    */
 
     Ok(())
 }
