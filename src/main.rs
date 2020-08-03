@@ -1,8 +1,13 @@
 extern crate clap;
+extern crate nix;
 
 use clap::{App, Arg};
 use std::fs::File;
 use std::io::{Error, ErrorKind, Read};
+use nix::unistd::Pid;
+use std::convert::TryInto;
+use nix::sys::signal::kill;
+use std::time::Duration;
 
 const MAGIC_PREFIX: &[u8] = "MON".as_bytes();
 
@@ -10,11 +15,10 @@ const MAGIC_PREFIX: &[u8] = "MON".as_bytes();
 struct PidStatus {
     pid: u32,
     is_alive: bool,
+    uptime: Duration,
 }
 
-fn write_pidfile(filename: &str) {
-    // Get pid of current process
-    let pid = std::process::id();
+fn write_pid(pid: u32, filename: &str) {
     // Array's doesn't implement + so concatenation works as shown,
     // also slicing is used to convert from fixed array
     std::fs::write(filename, [MAGIC_PREFIX, &pid.to_be_bytes()[0..]].concat());
@@ -46,10 +50,17 @@ fn pidfile_status(filename: &str) -> std::io::Result<PidStatus> {
      */
 
     let pid = u32::from_be_bytes([buf[3], buf[4], buf[5], buf[6]]);
-
+    // Kill command is not present in standard library, so need to use nix crate.
+    // What is try_into and unwrap from u32 to i32?
+    let kill_status = nix::sys::signal::kill(Pid::from_raw(pid.try_into().unwrap()), None);
+    // Returning  elapsed time is not working as Result is not a generic error.
+    let stat = std::fs::metadata(filename)?;
+    // TODO fix error
+    let uptime = stat.created()?.elapsed().map_err(|e| std::io::ErrorKind::Other)?;
     Ok(PidStatus {
         pid,
-        is_alive: true,
+        is_alive: kill_status.is_ok(),
+        uptime,
     })
 }
 
@@ -81,20 +92,21 @@ fn main() -> Result<(), std::io::Error> {
         }
         let pidfile = matches.value_of("pidfile").unwrap();
         let status = pidfile_status(pidfile)?;
-        println!("{:?}", status);
-    }
-
-    if matches.is_present("pidfile") {
-        write_pidfile(matches.value_of("pidfile").unwrap());
+        // 61406 : alive : uptime 27 seconds
+        if status.is_alive {
+            println!("{} : alive : uptime {:?}", status.pid, status.uptime);
+        } else {
+            println!("{} : dead", status.pid);
+        }
         return Ok(());
     }
 
-    /*
-    If not status and pidfile is present, write current process pid into it
-    Use magic number when writing, to not read pid from arbitrary file
-
-    Use same pidfile and display stats
-    */
+    if matches.is_present("pidfile") {
+        // Get pid of current process
+        let pid = std::process::id();
+        write_pid(pid, matches.value_of("pidfile").unwrap());
+        return Ok(());
+    }
 
     Ok(())
 }
