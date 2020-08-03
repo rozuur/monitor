@@ -26,13 +26,8 @@ fn pidfile_status(filename: &str) -> std::io::Result<u32> {
     let mut file = File::open(filename)?;
     let size = file.read(&mut buf[0..BUF_SIZE])?;
 
-    // assert_eq! should be preferred instead of assert
-    assert_eq!(
-        size, BUF_SIZE,
-        "Unable to read required bytes from {}",
-        filename
-    );
-    if &buf[0..3] != MAGIC_PREFIX {
+    // Using of assert will panic so combining it with validation
+    if size != BUF_SIZE || &buf[0..3] != MAGIC_PREFIX {
         return Err(Error::new(ErrorKind::InvalidData, "Invalid pidfile"));
     }
     /*
