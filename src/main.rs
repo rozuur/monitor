@@ -6,6 +6,12 @@ use std::io::{Error, ErrorKind, Read};
 
 const MAGIC_PREFIX: &[u8] = "MON".as_bytes();
 
+#[derive(Debug)]
+struct PidStatus {
+    pid: u32,
+    is_alive: bool,
+}
+
 fn write_pidfile(filename: &str) {
     // Get pid of current process
     let pid = std::process::id();
@@ -15,7 +21,7 @@ fn write_pidfile(filename: &str) {
 }
 
 // std::io::Result is type alias for std::result::Result<T, io::Error>
-fn pidfile_status(filename: &str) -> std::io::Result<u32> {
+fn pidfile_status(filename: &str) -> std::io::Result<PidStatus> {
     // Defining buffer as let buf_size = 64 fails, array initialization requires it as constant
     // And BUF_SIZE type should be usize, if not specified number will be treated as integer i32
     const BUF_SIZE: usize = MAGIC_PREFIX.len() + 4;
@@ -40,7 +46,11 @@ fn pidfile_status(filename: &str) -> std::io::Result<u32> {
      */
 
     let pid = u32::from_be_bytes([buf[3], buf[4], buf[5], buf[6]]);
-    Ok(pid)
+
+    Ok(PidStatus {
+        pid,
+        is_alive: true,
+    })
 }
 
 // To use '?' which unwraps a result or propagates error, main function should return Result
