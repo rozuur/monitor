@@ -2,11 +2,11 @@ extern crate clap;
 extern crate nix;
 
 use clap::{App, Arg};
-use std::fs::File;
-use std::io::{Error, ErrorKind, Read};
+use nix::sys::signal::kill;
 use nix::unistd::Pid;
 use std::convert::TryInto;
-use nix::sys::signal::kill;
+use std::fs::File;
+use std::io::{Error, ErrorKind, Read};
 use std::time::Duration;
 
 const MAGIC_PREFIX: &[u8] = "MON".as_bytes();
@@ -18,10 +18,10 @@ struct PidStatus {
     uptime: Duration,
 }
 
-fn write_pid(pid: u32, filename: &str) {
+fn write_pid(pid: u32, filename: &str) -> std::io::Result<()> {
     // Array's doesn't implement + so concatenation works as shown,
     // also slicing is used to convert from fixed array
-    std::fs::write(filename, [MAGIC_PREFIX, &pid.to_be_bytes()[0..]].concat());
+    std::fs::write(filename, [MAGIC_PREFIX, &pid.to_be_bytes()[0..]].concat())
 }
 
 // std::io::Result is type alias for std::result::Result<T, io::Error>
@@ -52,11 +52,14 @@ fn pidfile_status(filename: &str) -> std::io::Result<PidStatus> {
     let pid = u32::from_be_bytes([buf[3], buf[4], buf[5], buf[6]]);
     // Kill command is not present in standard library, so need to use nix crate.
     // What is try_into and unwrap from u32 to i32?
-    let kill_status = nix::sys::signal::kill(Pid::from_raw(pid.try_into().unwrap()), None);
+    let kill_status = kill(Pid::from_raw(pid.try_into().unwrap()), None);
     // Returning  elapsed time is not working as Result is not a generic error.
     let stat = std::fs::metadata(filename)?;
     // TODO fix error
-    let uptime = stat.created()?.elapsed().map_err(|e| std::io::ErrorKind::Other)?;
+    let uptime = stat
+        .created()?
+        .elapsed()
+        .map_err(|_e| std::io::ErrorKind::Other)?;
     Ok(PidStatus {
         pid,
         is_alive: kill_status.is_ok(),
@@ -104,7 +107,7 @@ fn main() -> Result<(), std::io::Error> {
     if matches.is_present("pidfile") {
         // Get pid of current process
         let pid = std::process::id();
-        write_pid(pid, matches.value_of("pidfile").unwrap());
+        write_pid(pid, matches.value_of("pidfile").unwrap())?;
         return Ok(());
     }
 
