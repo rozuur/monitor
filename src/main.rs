@@ -36,7 +36,6 @@ fn pidfile_status(filename: &str) -> std::io::Result<PidStatus> {
     let size = file.read(&mut buf[0..BUF_SIZE])?;
 
     // FIXME std::io::Result
-    println!("{:?}", std::str::from_utf8(&buf));
     let pid: u32 = std::str::from_utf8(&buf[..size])
         .map_err(|_e| std::io::ErrorKind::Other)?
         .parse()
@@ -126,7 +125,10 @@ fn main() -> Result<(), std::io::Error> {
 
     // Doesn't clap provide error messages if required?
     let command = matches.value_of("command").expect("command is required");
-    Command::new("sh").arg("-c").arg(command).spawn()?;
+    let child = Command::new("sh").arg("-c").arg(command).spawn()?;
+    if matches.is_present("pidfile") {
+        write_pid(child.id(), matches.value_of("pidfile").unwrap())?;
+    }
 
     Ok(())
 }
