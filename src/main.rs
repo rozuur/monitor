@@ -1,12 +1,13 @@
 extern crate clap;
 extern crate nix;
 
-use clap::{App, Arg};
+use clap::{App, Arg, ArgMatches};
 use nix::sys::signal::kill;
 use nix::unistd::Pid;
 use std::convert::TryInto;
 use std::fs::File;
-use std::io::{Error, ErrorKind, Read};
+use std::io::Read;
+use std::process::Command;
 use std::time::Duration;
 
 #[derive(Debug)]
@@ -36,8 +37,10 @@ fn pidfile_status(filename: &str) -> std::io::Result<PidStatus> {
 
     // FIXME std::io::Result
     println!("{:?}", std::str::from_utf8(&buf));
-    let pid:u32 = std::str::from_utf8(&buf[..size]).map_err(|_e| std::io::ErrorKind::Other)?
-        .parse().map_err(|_e| std::io::ErrorKind::Other)?;
+    let pid: u32 = std::str::from_utf8(&buf[..size])
+        .map_err(|_e| std::io::ErrorKind::Other)?
+        .parse()
+        .map_err(|_e| std::io::ErrorKind::Other)?;
 
     // Kill command is not present in standard library, so need to use nix crate.
     // What is try_into and unwrap from u32 to i32?
@@ -54,6 +57,27 @@ fn pidfile_status(filename: &str) -> std::io::Result<PidStatus> {
         is_alive: kill_status.is_ok(),
         uptime,
     })
+}
+
+fn print_status(matches: &ArgMatches) -> Result<(), std::io::Error> {
+    // TODO take pidfile only
+    let pidfile = matches.value_of("pidfile");
+    if pidfile.is_none() {
+        eprintln!("Error: --pidfile required");
+        std::process::exit(1);
+        // Rust has panic and abort but they don't fail silently
+    }
+    // TODO is this an idiomatic way of unwrapping after checking?
+    let pidfile = pidfile.unwrap();
+    let status = pidfile_status(pidfile)?;
+    // 61406 : alive : uptime 27 seconds
+    if status.is_alive {
+        println!("{} : alive : uptime {:?}", status.pid, status.uptime);
+    } else {
+        println!("{} : dead", status.pid);
+    }
+
+    Ok(())
 }
 
 // To use '?' which unwraps a result or propagates error, main function should return Result
@@ -81,22 +105,15 @@ fn main() -> Result<(), std::io::Error> {
                 .value_name("FILE")
                 .help("write mon pid to <path>"),
         )
+        .arg(
+            Arg::with_name("command")
+                .value_name("CMD")
+                .help("command to be executed"),
+        )
         .get_matches();
 
     if matches.is_present("status") {
-        if !matches.is_present("pidfile") {
-            eprintln!("Error: --pidfile required");
-            std::process::exit(1);
-            // Rust has panic and abort but they don't fail silently
-        }
-        let pidfile = matches.value_of("pidfile").unwrap();
-        let status = pidfile_status(pidfile)?;
-        // 61406 : alive : uptime 27 seconds
-        if status.is_alive {
-            println!("{} : alive : uptime {:?}", status.pid, status.uptime);
-        } else {
-            println!("{} : dead", status.pid);
-        }
+        print_status(&matches)?;
         return Ok(());
     }
 
@@ -106,6 +123,10 @@ fn main() -> Result<(), std::io::Error> {
         write_pid(pid, matches.value_of("mon-pidfile").unwrap())?;
         return Ok(());
     }
+
+    // Doesn't clap provide error messages if required?
+    let command = matches.value_of("command").expect("command is required");
+    Command::new("sh").arg("-c").arg(command).spawn()?;
 
     Ok(())
 }
